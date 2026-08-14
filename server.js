@@ -24,13 +24,15 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS notifications (
       id          BIGSERIAL PRIMARY KEY,
       external_id TEXT UNIQUE,
-      source      TEXT NOT NULL CHECK (source IN ('whatsapp','messenger','instagram')),
+      source      TEXT NOT NULL CHECK (source IN ('whatsapp','messenger','instagram','sms')),
       sender      TEXT,
       body        TEXT,
       occurred_at TIMESTAMPTZ NOT NULL,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS notifications_source_time_idx ON notifications (source, occurred_at DESC);
+    ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_source_check;
+    ALTER TABLE notifications ADD CONSTRAINT notifications_source_check CHECK (source IN ('whatsapp','messenger','instagram','sms'));
   `)
 }
 
@@ -40,7 +42,7 @@ app.post('/api/webhook/:token', async (req, res) => {
   if (!WEBHOOK_TOKEN || req.params.token !== WEBHOOK_TOKEN) return res.status(403).end()
   const payload = req.body && Object.keys(req.body).length ? req.body : req.query
   const { source, sender, body } = payload
-  if (!source || !['whatsapp', 'messenger', 'instagram'].includes(source)) {
+  if (!source || !['whatsapp', 'messenger', 'instagram', 'sms'].includes(source)) {
     return res.status(400).json({ error: 'invalid source' })
   }
   const occurredAt = payload.occurred_at || new Date().toISOString()

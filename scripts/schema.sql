@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS notifications (
   id          BIGSERIAL PRIMARY KEY,
   external_id TEXT UNIQUE,         -- sha1(source|sender|body|60s-bucket); dedupes webhook retries
-  source      TEXT NOT NULL CHECK (source IN ('whatsapp','messenger','instagram')),
+  source      TEXT NOT NULL CHECK (source IN ('whatsapp','messenger','instagram','sms')),
   sender      TEXT,                -- notification title, i.e. the contact/group name
   body        TEXT,                -- notification text, often truncated by Android
   occurred_at TIMESTAMPTZ NOT NULL,
