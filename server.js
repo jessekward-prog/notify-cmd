@@ -65,13 +65,15 @@ app.post('/api/webhook/:token', async (req, res) => {
 
 app.get('/api/notifications/recent', async (req, res) => {
   if (!SERVICE_TOKEN || req.headers['x-service-token'] !== SERVICE_TOKEN) return res.status(403).end()
-  const limit = Math.min(parseInt(req.query.limit) || 30, 200)
+  const limit = Math.min(parseInt(req.query.limit) || 30, 500)
   const source = req.query.source || null
+  const since = req.query.since || null
   const { rows } = await pool.query(
     `SELECT id, source, sender, body, occurred_at
      FROM notifications
      WHERE ($1::text IS NULL OR source = $1)
-     ORDER BY occurred_at DESC LIMIT $2`, [source, limit]
+       AND ($3::timestamptz IS NULL OR occurred_at >= $3)
+     ORDER BY occurred_at DESC LIMIT $2`, [source, limit, since]
   )
   res.json(rows.reverse())
 })
