@@ -33,6 +33,9 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS notifications_source_time_idx ON notifications (source, occurred_at DESC);
     ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_source_check;
     ALTER TABLE notifications ADD CONSTRAINT notifications_source_check CHECK (source IN ('whatsapp','messenger','instagram','sms'));
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'in';
+    ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_direction_check;
+    ALTER TABLE notifications ADD CONSTRAINT notifications_direction_check CHECK (direction IN ('in','out'));
   `)
 }
 
@@ -42,6 +45,7 @@ app.post('/api/webhook/:token', async (req, res) => {
   if (!WEBHOOK_TOKEN || req.params.token !== WEBHOOK_TOKEN) return res.status(403).end()
   const payload = req.body && Object.keys(req.body).length ? req.body : req.query
   const { source, sender, body } = payload
+  const direction = payload.direction === 'out' ? 'out' : 'in'
   if (!source || !['whatsapp', 'messenger', 'instagram', 'sms'].includes(source)) {
     return res.status(400).json({ error: 'invalid source' })
   }
@@ -50,13 +54,13 @@ app.post('/api/webhook/:token', async (req, res) => {
   // within a 60s bucket — same trick text-cmd uses for its no-stable-id case.
   const bucket = Math.floor(Date.now() / 60000)
   const externalId = crypto.createHash('sha1')
-    .update(`${source}|${sender || ''}|${body || ''}|${bucket}`)
+    .update(`${source}|${direction}|${sender || ''}|${body || ''}|${bucket}`)
     .digest('hex')
   await pool.query(
-    `INSERT INTO notifications (external_id, source, sender, body, occurred_at)
-     VALUES ($1,$2,$3,$4,$5)
+    `INSERT INTO notifications (external_id, source, sender, body, occurred_at, direction)
+     VALUES ($1,$2,$3,$4,$5,$6)
      ON CONFLICT (external_id) DO NOTHING`,
-    [externalId, source, sender || null, body || null, occurredAt]
+    [externalId, source, sender || null, body || null, occurredAt, direction]
   )
   res.json({ ok: true })
 })
@@ -69,7 +73,7 @@ app.get('/api/notifications/recent', async (req, res) => {
   const source = req.query.source || null
   const since = req.query.since || null
   const { rows } = await pool.query(
-    `SELECT id, source, sender, body, occurred_at
+    `SELECT id, source, sender, body, occurred_at, direction
      FROM notifications
      WHERE ($1::text IS NULL OR source = $1)
        AND ($3::timestamptz IS NULL OR occurred_at >= $3)
