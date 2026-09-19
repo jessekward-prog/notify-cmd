@@ -102,11 +102,14 @@ async function main() {
     }
     let r = await post(batch)
     assert.equal(r.status, 200, 'batch accepted')
+    assert.deepEqual(await r.json(), { ok: true, stored: 2, duplicates: 0, rejected: 0 })
     assert.equal(await count(`app_package = 'com.whatsapp'`), 2, 'batch stored both messages')
 
     // Replaying it is what Android actually does — MessagingStyle re-sends the whole
     // conversation on every new message. It must not duplicate.
-    await post(batch)
+    r = await post(batch)
+    assert.deepEqual(await r.json(), { ok: true, stored: 0, duplicates: 2, rejected: 0 },
+      'replay reports duplicates, not stores')
     await post(batch)
     assert.equal(await count(`app_package = 'com.whatsapp'`), 2, 'replayed batch deduped')
 

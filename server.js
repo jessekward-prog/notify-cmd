@@ -55,7 +55,7 @@ const EXTERNAL_ID_RE = /^[a-f0-9]{8,128}$/i
 
 async function ingest(payload) {
   const source = String(payload.source || '')
-  if (!SOURCE_RE.test(source)) return false
+  if (!SOURCE_RE.test(source)) return { accepted: false, inserted: false }
   const direction = payload.direction === 'out' ? 'out' : 'in'
   const kind = payload.kind === 'other' ? 'other' : 'msg'
   const sender = payload.sender || null
@@ -72,7 +72,7 @@ async function ingest(payload) {
         .update(`${source}|${direction}|${sender || ''}|${body || ''}|${bucket}`)
         .digest('hex')
 
-  await pool.query(
+  const { rowCount } = await pool.query(
     `INSERT INTO notifications
        (external_id, source, sender, body, occurred_at, direction, app_package, thread_key, kind)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -80,7 +80,7 @@ async function ingest(payload) {
     [externalId, source, sender, body, occurredAt, direction,
      payload.app_package || null, payload.thread_key || null, kind]
   )
-  return true
+  return { accepted: true, inserted: rowCount === 1 }
 }
 
 app.post('/api/webhook/:token', async (req, res) => {
@@ -89,13 +89,17 @@ app.post('/api/webhook/:token', async (req, res) => {
   const items = Array.isArray(payload.items) ? payload.items : [payload]
   if (items.length > 500) return res.status(413).json({ error: 'too many items' })
 
-  let stored = 0
+  // 'stored' is rows actually written; a replayed batch is accepted but stores 0,
+  // which is the distinction you need when working out whether an event landed.
+  let accepted = 0, stored = 0
   for (const item of items) {
-    if (await ingest(item)) stored++
+    const r = await ingest(item)
+    if (r.accepted) accepted++
+    if (r.inserted) stored++
   }
-  const rejected = items.length - stored
-  if (!stored && rejected) return res.status(400).json({ error: 'invalid source' })
-  res.json({ ok: true, stored, rejected })
+  const rejected = items.length - accepted
+  if (!accepted && rejected) return res.status(400).json({ error: 'invalid source' })
+  res.json({ ok: true, stored, duplicates: accepted - stored, rejected })
 })
 
 // --- Read, service-to-service — used by reverb's notify-cmd tools ---
